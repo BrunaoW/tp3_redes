@@ -1,0 +1,57 @@
+{
+    // Use o IntelliSense para saber mais sobre os atributos possíveis.
+    // Focalizar para exibir as descrições dos atributos existentes.
+    // Para obter mais informações, acesse: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "client",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/client",
+            "args": ["127.0.0.1:5001", "5,6,7"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Habilitar a reformatação automática para gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build program",
+            "miDebuggerPath": "/bin/gdb"
+        },
+        {
+            "name": "peer",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/peer",
+            "args": ["5003", "key-values-files_peer3", "127.0.0.1:5001", "127.0.0.5:5005"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Habilitar a reformatação automática para gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "build program",
+            "miDebuggerPath": "/bin/gdb"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "peer/cliente",
+            "configurations": ["peer", "client"],
+            "preLaunchTask": "${defaultBuildTask}"
+        }
+    ]
+}
