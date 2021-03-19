@@ -4,6 +4,8 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <string.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <vector>
 #include <iostream>
@@ -11,6 +13,8 @@
 #include <map>
 
 #include "util.h"
+
+#define MAX_BUFFER_SIZE 64
 
 struct neighboor_peer
 {
@@ -32,6 +36,10 @@ int main(int argc, char* argv[]) {
     char* ip_and_port = argv[1];
     char* peer_ip = strtok(ip_and_port, ":");
     char* peer_port = strtok(NULL, ":");
+
+    // informacao da conexao recebida
+    struct sockaddr_storage communicator_info;
+    socklen_t communicator_addr_len;
 
     struct addrinfo peerInfo, *res;
     memset(&peerInfo, 0, sizeof(peerInfo));
@@ -71,7 +79,7 @@ int main(int argc, char* argv[]) {
     std::string actual_key_values_file_line;
     std::ifstream key_values_file(argv[2]);
 
-    std::map<int, char*> key_values_file_map;
+    std::map<uint8_t, char*> key_values_file_map;
 
     if(!key_values_file.is_open())
         logexit("opening key values file error\n");
@@ -83,30 +91,84 @@ int main(int argc, char* argv[]) {
         char *key_values_file_id = strtok(key_values_file_string_to_tokenize, ":");
         char *key_values_file_name = strtok(NULL, ":");
 
-        int key_values_file_id_int = parseInt(key_values_file_id);
+        uint8_t key_values_file_id_int = parse_uint8(key_values_file_id);
         key_values_file_map[key_values_file_id_int] = key_values_file_name;
     }
 
 
     while(1) {
         // declarar um buffer vetor de char com um tamanho maior que suficiente para o recebimento
+        char buffer_received[MAX_BUFFER_SIZE];
         
         // esperar a chegada de uma mensagem (recvfrom)
+        int bytes_received = recvfrom(peer_sock, buffer_received, MAX_BUFFER_SIZE-1, 0, (struct sockaddr*)&communicator_info, &communicator_addr_len);
+
+        if (bytes_received < 0) {
+            logexit("recvfrom() error\n");
+        }
+
+        char msg_type_received[2];
+        msg_type_received[0] = buffer_received[0];
+        msg_type_received[1] = buffer_received[1];
 
         // identificar o tipo de mensagem (primeiros 2 bytes)
+        uint16_t message_type_received = parse_uint16(msg_type_received);
 
-        // caso seja QUERY:
-        // Realizar um Type cast com o IP e Porto pra um uint e ushort
-        // Type cast para ushort para a qtd de chunks
-        // Alocar uma lista/vetor de ushort com o tamanho da quantidade
+        HELLO_MESSAGE hello_msg_received;
+        GET_MESSAGE get_msg_received;
+        QUERY_MESSAGE query_message_received;
 
-        // caso seja HELLO/GET:
-        // Realizar um type cast pra ushort para a qtd de chunks
-        // Alocar uma lista/vetor de ushort com o tamanho da quantidade
+        switch (message_type_received) {
+            // caso seja QUERY:
+            // Realizar um Type cast com o IP e Porto pra um uint e ushort
+            // Type cast para ushort para a qtd de chunks
+            // Alocar uma lista/vetor de ushort com o tamanho da quantidade
+            case MESSAGE_TYPE::QUERY: 
+                char client_ip_received[4];
+                client_ip_received[0] = buffer_received[2];
+                client_ip_received[1] = buffer_received[3];
+                client_ip_received[2] = buffer_received[4];
+                client_ip_received[3] = buffer_received[5];
 
+                // char* client_ip_parsed = parse_ip_recv(client_ip_received);
+
+                char client_port_received[2];
+                client_port_received[0] = buffer_received[6];
+                client_port_received[1] = buffer_received[7];
+                
+                // uint16_t port = parse_port_recv(client_port_received);
+
+                char peer_ttl[2];
+                peer_ttl[0] = buffer_received[8];
+                peer_ttl[1] = buffer_received[9];
+
+                char chunks_amount[2];
+                chunks_amount[0] = buffer_received[10];
+                chunks_amount[1] = buffer_received[11];
+
+                // iterar sobre o buffer received para salvar a lista de chunks id
+                break;
+            
+            case MESSAGE_TYPE::HELLO:
+            case MESSAGE_TYPE::GET:
+                // caso seja HELLO/GET:
+                // Realizar um type cast pra ushort para a qtd de chunks
+                // Alocar uma lista/vetor de ushort com o tamanho da quantidade
+
+                char chunks_amount[2];
+                chunks_amount[0] = buffer_received[10];
+                chunks_amount[1] = buffer_received[11];
+
+                // iterar sobre o buffer received para salvar a lista de chunks id
+
+                break;
+        }
+
+        
         // Apos a inicialização das structs das mensagens
         
         // Caso seja msg HELLO:
+        // Salvar informaçoes IP e Porto do cliente
         // Verificar se possui algum chunk rquisitado pelo cliente
         // Montar a mensagem CHUNKS_INFO
         // enviar pro cliente via sendto
@@ -117,6 +179,10 @@ int main(int argc, char* argv[]) {
         // Peer-TTL = 3
         // Quantidade de chunks: Todos recebidos - Contido pelo peer atual
         // Enviar mensagem QUERY para todos os peers vizinhos
+
+        if (message_type_received == MESSAGE_TYPE::HELLO) {
+            
+        }
 
         // Caso seja msg QUERY:
         // Verificar lista de chunks recebida e se há um ou mais chunks contidos
