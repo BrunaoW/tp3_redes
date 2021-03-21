@@ -23,14 +23,14 @@
                 }
             ],
             "preLaunchTask": "build program",
-            "miDebuggerPath": "/bin/gdb"
+            "miDebuggerPath": "/usr/bin/gdb"
         },
         {
             "name": "peer",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/peer",
-            "args": ["5003", "key-values-files_peer3", "127.0.0.1:5001", "127.0.0.5:5005"],
+            "args": ["127.0.0.3:5003", "key-values-files_peer3", "127.0.0.1:5001", "127.0.0.5:5005"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
@@ -44,7 +44,7 @@
                 }
             ],
             "preLaunchTask": "build program",
-            "miDebuggerPath": "/bin/gdb"
+            "miDebuggerPath": "/usr/bin/gdb"
         }
     ],
     "compounds": [

@@ -93,6 +93,9 @@ int main(int argc, char* argv[]) {
         key_values_file_map[key_values_file_id_int] = key_values_file_name;
     }
 
+    QUERY_MESSAGE last_query_message_received;
+    last_query_message_received.client_ip = 0;
+    last_query_message_received.client_port = 0;
 
     while(1) {
         // declarar um buffer vetor de char com um tamanho maior que suficiente para o recebimento
@@ -150,6 +153,7 @@ int main(int argc, char* argv[]) {
                 chunks_amount[1] = buffer_received[11];
 
                 // iterar sobre o buffer received para salvar a lista de chunks id
+
                 break;
             
             case MESSAGE_TYPE::HELLO:
@@ -237,6 +241,12 @@ int main(int argc, char* argv[]) {
             query_msg_to_send.client_ip = query_message_received.client_ip;
             query_msg_to_send.client_port = query_message_received.client_port;
             query_msg_to_send.peer_ttl = query_message_received.peer_ttl - 1;
+
+            bool query_already_received = last_query_message_received.client_ip == query_message_received.client_ip && last_query_message_received.client_port == query_message_received.client_port;
+
+            if (query_already_received) {
+                continue;
+            }
 
             struct sockaddr_in client_addr;
             socklen_t client_addr_len = (socklen_t)sizeof(sockaddr);
