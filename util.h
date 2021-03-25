@@ -1,31 +1,25 @@
 #pragma once
 
-enum MESSAGE_TYPE: uint16_t {
-    HELLO,
-    QUERY,
-    CHUNKS_INFO,
-    GET,
-    RESPONSE
-};
+#define HELLO 1
+#define QUERY 2
+#define CHUNKS_INFO 3
+#define GET 4
+#define RESPONSE 5
 
-struct MESSAGE {
-    MESSAGE_TYPE msg_type;
-};
-
-struct HELLO_MESSAGE : MESSAGE {
-    MESSAGE_TYPE msg_type = MESSAGE_TYPE::HELLO;
+struct HELLO_MESSAGE {
+    uint16_t msg_type = HELLO;
     uint16_t chunks_amount = 0;
     uint16_t chunks_id[10];
 };
 
-struct GET_MESSAGE : MESSAGE {
-    MESSAGE_TYPE msg_type = MESSAGE_TYPE::GET;
+struct GET_MESSAGE {
+    uint16_t msg_type = GET;
     uint16_t chunks_amount = 0;
     uint16_t chunks_id[10];
 };
 
-struct QUERY_MESSAGE : MESSAGE {
-    MESSAGE_TYPE msg_type = MESSAGE_TYPE::QUERY;
+struct QUERY_MESSAGE {
+    uint16_t msg_type = QUERY;
     uint32_t client_ip;
     uint16_t client_port;
     uint16_t peer_ttl;
@@ -33,14 +27,14 @@ struct QUERY_MESSAGE : MESSAGE {
     uint16_t chunks_id[10];
 };
 
-struct CHUNKS_INFO_MESSAGE : MESSAGE {
-    MESSAGE_TYPE msg_type = MESSAGE_TYPE::CHUNKS_INFO;
+struct CHUNKS_INFO_MESSAGE {
+    uint16_t msg_type = CHUNKS_INFO;
     uint16_t chunks_amount = 0;
     uint16_t chunks_id[10];
 };
 
-struct RESPONSE_MESSAGE : MESSAGE {
-    MESSAGE_TYPE msg_type = MESSAGE_TYPE::RESPONSE;
+struct RESPONSE_MESSAGE {
+    uint16_t msg_type = RESPONSE;
     uint16_t chunk_id;
     uint16_t chunk_size = 0;
     char chunk[1024];

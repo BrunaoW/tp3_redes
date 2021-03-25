@@ -24,102 +24,106 @@ void usage(int argc, char **argv) {
 }
 
 struct client_info_for_thread {
-    int client_sock;
-    MESSAGE_TYPE msg_received;
+    uint16_t msg_received;
     in_addr ip_received;
     uint16_t port_received;
-    uint16_t chunk_id_associed;
+    uint16_t chunk_id_associated;
 };
 
 void* receive_chunk_info_thread(void* client_info) {
     struct client_info_for_thread* c_info_for_thread = (struct client_info_for_thread*)client_info;
-    char buffer_received[MAX_BUFFER_SIZE];
+    uint16_t buffer_received[MAX_BUFFER_SIZE];
     struct sockaddr_in peer_connecting_info;
-    socklen_t communicator_addr_len;
+    socklen_t communicator_addr_len = sizeof(struct sockaddr_in);
+
+    int client_sock;
+    client_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (client_sock < 0) {
+        logexit("socket() error\n");
+    }
+
+    int enable = 1;
+    if (0 != setsockopt(client_sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int))){
+        logexit("UDP setsockopt");
+    }
+
+    // atribui um timeout
+    struct timeval tv;
+    tv.tv_sec = 6;
+    tv.tv_usec = 500000;
+    if (setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv,sizeof(tv)) < 0) {
+        perror("Error creating timeout");
+    }
 
     // Esperar recebimento de mensagem CHUNKS_INFO ou RESPONSE
-    int bytes_received = recvfrom(c_info_for_thread->client_sock, buffer_received, strlen(buffer_received)-1, 0, (struct sockaddr*)&peer_connecting_info, &communicator_addr_len);
+    int bytes_received = recvfrom(client_sock, (void*)buffer_received, MAX_BUFFER_SIZE-1, 0, (struct sockaddr*)&peer_connecting_info, &communicator_addr_len);
     if (bytes_received < 0) {
-        char* error_msg;
-        sprintf(error_msg, "recvfrom() error: socket = %d\n", c_info_for_thread->client_sock);
+        printf("recvfrom() error: socket = %d\n", client_sock);
 
-        logexit(error_msg);
+        pthread_exit((void*)EXIT_FAILURE);
     }
 
-    char msg_type_received[2];
-    msg_type_received[0] = buffer_received[0];
-    msg_type_received[1] = buffer_received[1];
+    CHUNKS_INFO_MESSAGE chunks_info_received;
+    RESPONSE_MESSAGE response_message_received;
 
-    uint16_t message_type_received = parse_uint16(msg_type_received);
-    
-    // Caso seja CHUNKS_INFO
-    if (message_type_received == MESSAGE_TYPE::CHUNKS_INFO) {
-        c_info_for_thread->msg_received = MESSAGE_TYPE::CHUNKS_INFO;
+    switch(ntohs(buffer_received[0])) {
+        case (uint16_t)CHUNKS_INFO:
+            c_info_for_thread->msg_received = (uint16_t)CHUNKS_INFO;
+            
+            // salvar ip e porto do peer que enviou
+            c_info_for_thread->ip_received = peer_connecting_info.sin_addr;
+            c_info_for_thread->port_received = peer_connecting_info.sin_port;
 
-        // salvar ip e porto do peer que enviou
-        c_info_for_thread->ip_received = peer_connecting_info.sin_addr;
-        c_info_for_thread->port_received = peer_connecting_info.sin_port;
+            chunks_info_received.chunks_amount = ntohs(buffer_received[1]);
+            for (uint16_t i = 0; i < chunks_info_received.chunks_amount; i++)
+                chunks_info_received.chunks_id[i] = ntohs(buffer_received[i + 2]);
 
-        // salvar as informações dos chunks que o peer possui
-        char chunks_amount[2];
-        chunks_amount[0] = buffer_received[2];
-        chunks_amount[1] = buffer_received[3];
+            GET_MESSAGE get_message_to_send;
+            get_message_to_send.msg_type = htons(get_message_to_send.msg_type);
+            get_message_to_send.chunks_amount = htons(chunks_info_received.chunks_amount);
+            for (uint16_t i = 0; i < chunks_info_received.chunks_amount; i++)
+                get_message_to_send.chunks_id[i] = ntohs(chunks_info_received.chunks_id[i]);
 
-        uint16_t chunks_amount_numeric = parse_uint16(chunks_amount);
-        uint16_t chunks_id_numeric[10];
+            int bytes_sent = sendto(client_sock, (void*)&get_message_to_send, sizeof(GET_MESSAGE), 0, (struct sockaddr*)&peer_connecting_info.sin_addr, communicator_addr_len);
+            if (bytes_sent < 0) {
+                logexit("sendto() error\n");
+            }
 
-        // TODO: Ver como salvar os Id's recebidos
+            pthread_exit(EXIT_SUCCESS);
+            break;
+        case (uint16_t)RESPONSE:
+            c_info_for_thread->msg_received = (uint16_t)RESPONSE;
 
-        // - Enviar mensagem GET
-        GET_MESSAGE get_message_to_send;
-        get_message_to_send.chunks_amount = chunks_amount_numeric;
-        memcpy(get_message_to_send.chunks_id, chunks_id_numeric, sizeof(get_message_to_send.chunks_id));
+            uint16_t chunk_received_id = ntohs(buffer_received[1]);
+            c_info_for_thread->chunk_id_associated = chunk_received_id;
+            response_message_received.chunk_id = chunk_received_id;
+            response_message_received.chunk_size = ntohs(buffer_received[2]);
+            
+            // - Abrir um arquivo para escrita
+            char* file_name;
+            sprintf(file_name, "received_chunk_%d", chunk_received_id);
 
-        int bytes_sent = sendto(c_info_for_thread->client_sock, &get_message_to_send, sizeof(GET_MESSAGE), 0, (struct sockaddr*)&peer_connecting_info.sin_addr, communicator_addr_len);
-        if (bytes_sent < 0) {
-            logexit("sendto() error\n");
-        }
+            char* chunk_content_char_array = (char*)&buffer_received[3];
 
-        pthread_exit(EXIT_SUCCESS);
-    }
+            // - Escrever o buffer recebido no arquivo
+            std::ofstream write_file(file_name);
+            
+            if(!write_file.is_open()) {
+                logexit("open file error\n");
+            }
 
-    // Caso seja RESPONSE
-    if (message_type_received == MESSAGE_TYPE::RESPONSE) {
-        c_info_for_thread->msg_received = MESSAGE_TYPE::RESPONSE;
+            write_file.write(chunk_content_char_array, sizeof(char) * 1024);
 
-        // Identificar chunk recebido
-        char chunk_received_id[2];
-        chunk_received_id[0] = buffer_received[3];
-        chunk_received_id[1] = buffer_received[4];
+            // - salvar arquivo com o respectivo nome do chunk
+            write_file.close();
+            
+            // - salvar ip e porto do peer que enviou
+            c_info_for_thread->ip_received = peer_connecting_info.sin_addr;
+            c_info_for_thread->port_received = peer_connecting_info.sin_port;
 
-        uint16_t chunk_received_id_numeric = parse_uint16(chunk_received_id);
-        c_info_for_thread->chunk_id_associed = chunk_received_id_numeric;
-        
-        // - Abrir um arquivo para escrita
-        char* file_name;
-        sprintf(file_name, "received_chunk_%d", chunk_received_id_numeric);
-
-        char chunk_content_char_array[1024];
-        strncpy(chunk_content_char_array, buffer_received + 7, 1024);
-
-        // - Escrever o buffer recebido no arquivo
-        std::ofstream write_file(file_name);
-        
-        if(!write_file.is_open()) {
-            logexit("open file error\n");
-        }
-
-        write_file.write(chunk_content_char_array, sizeof(char) * 1024);
-
-        // - salvar arquivo com o respectivo nome do chunk
-        write_file.close();
-        
-        // - salvar ip e porto do peer que enviou
-        c_info_for_thread->ip_received = peer_connecting_info.sin_addr;
-        c_info_for_thread->port_received = peer_connecting_info.sin_port;
-
-        // - encerrar thread
-        pthread_exit(EXIT_SUCCESS);
+            // - encerrar thread
+            pthread_exit(EXIT_SUCCESS);
+            break;
     }
 
     pthread_exit((void*)EXIT_FAILURE);
@@ -162,49 +166,40 @@ int main(int argc, char* argv[]) {
 
     // Criar N threads, de acordo com a quantidade de chunks requisitados
 
-    std::vector<pthread_t> chunk_search_threads;
+    std::vector<pthread_t*> chunk_search_threads;
     std::vector<struct client_info_for_thread*> info_used_in_threads;
 
     for (uint16_t &chunk_id : chunks_id_read) {
         // Criar socket UDP
-        int client_sock;
-        client_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (client_sock < 0) {
-            logexit("socket() error\n");
-        }
-
         struct client_info_for_thread c_info_for_thread;
         struct client_info_for_thread alternate_c_info_for_thread;
-
-        c_info_for_thread.client_sock = client_sock;
-        alternate_c_info_for_thread.client_sock = client_sock;
-
+        info_used_in_threads.push_back(&c_info_for_thread);
+        info_used_in_threads.push_back(&alternate_c_info_for_thread);
+        
         pthread_t chunk_thread_id;
+        pthread_t alternate_chunk_thread_id;
+        chunk_search_threads.push_back(&chunk_thread_id);
+        chunk_search_threads.push_back(&alternate_chunk_thread_id);
+
         if (pthread_create(&chunk_thread_id, NULL, &receive_chunk_info_thread, &c_info_for_thread) != 0) {
             logexit("pthread_create() error\n");
         }
 
-        pthread_t alternate_chunk_thread_id;
         if (pthread_create(&alternate_chunk_thread_id, NULL, &receive_chunk_info_thread, &alternate_c_info_for_thread) != 0) {
             logexit("pthread_create() error\n");
         }
-
-        chunk_search_threads.push_back(chunk_thread_id);
-        chunk_search_threads.push_back(alternate_chunk_thread_id);
-
-        info_used_in_threads.push_back(&c_info_for_thread);
-        info_used_in_threads.push_back(&alternate_c_info_for_thread);
     }
 
     // Essas threads irão esperar, por um tempo determinado, um recvfrom dos peers que contém os chunks
     // caso ultrapasse esse tempo de espera, será dado um timeout
 
     // Montar uma HELLO_MESSAGE
-    uint16_t *chunks_id_array = &chunks_id_read[0];
-
     HELLO_MESSAGE hello_message_to_send;
-    hello_message_to_send.chunks_amount = chunks_id_read.size();
-    memcpy(hello_message_to_send.chunks_id, chunks_id_array, hello_message_to_send.chunks_amount);
+    hello_message_to_send.msg_type = htons(hello_message_to_send.msg_type);
+    hello_message_to_send.chunks_amount = htons(chunks_id_read.size());
+    for(uint16_t i = 0; i < chunks_id_read.size(); i++)
+        hello_message_to_send.chunks_id[i] = htons(chunks_id_read[i]);
+
 
     // Cria socket pra mensagem HELLO    
     int hello_msg_client_sock;
@@ -213,16 +208,21 @@ int main(int argc, char* argv[]) {
         logexit("socket() error\n");
     }
 
+    int enable = 1;
+    if (0 != setsockopt(hello_msg_client_sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int))){
+        logexit("UDP setsockopt");
+    }
+
     // Enviar ao peer de contato
-    int bytes_sent = sendto(hello_msg_client_sock, &hello_message_to_send, sizeof(HELLO_MESSAGE), 0, peer_addr->ai_addr, peer_addr->ai_addrlen);
+    int bytes_sent = sendto(hello_msg_client_sock, (void*)&hello_message_to_send, sizeof(HELLO_MESSAGE), 0, peer_addr->ai_addr, peer_addr->ai_addrlen);
     if (bytes_sent < 0) {
         logexit("sendto() error\n");
     }
 
     // Aguardar a finalização de todas as threads
 
-    for (pthread_t &thread_id : chunk_search_threads) {
-        pthread_join(thread_id, NULL);
+    for (pthread_t* &thread_id : chunk_search_threads) {
+        pthread_join(*thread_id, NULL);
     }
 
     // Abrir um arquivo com o nome "output-IP.log" com o IP sendo o do cliente
@@ -233,7 +233,9 @@ int main(int argc, char* argv[]) {
     char *output_file_name;
     char *client_ip;
 
-    inet_ntop(AF_INET, contact_peer_info.ai_addr, client_ip, INET_ADDRSTRLEN);
+    if(!inet_ntop(AF_INET, contact_peer_info.ai_addr, client_ip, INET_ADDRSTRLEN)) {
+        logexit("inet_ntop() error");
+    }
 
     sprintf(output_file_name, "Output-%s.log", client_ip);
 
@@ -244,15 +246,17 @@ int main(int argc, char* argv[]) {
     }
 
     for (struct client_info_for_thread* &c_info_used_in_thread : info_used_in_threads) {
-        if (c_info_used_in_thread->msg_received == MESSAGE_TYPE::RESPONSE) {
-                char *line_to_write;
-                char *peer_ip;
+        if (c_info_used_in_thread->msg_received == (uint16_t)RESPONSE) {
+            char *line_to_write;
+            char *peer_ip;
 
-                inet_ntop(AF_INET, &(c_info_used_in_thread->ip_received), peer_ip, INET_ADDRSTRLEN);
-                
-                sprintf(line_to_write, "%s : %d - %d\n", peer_ip, c_info_used_in_thread->port_received, c_info_used_in_thread->chunk_id_associed);
+            if (!inet_ntop(AF_INET, &(c_info_used_in_thread->ip_received), peer_ip, INET_ADDRSTRLEN)) {
+                logexit("inet_ntop() error");
+            }
+            
+            sprintf(line_to_write, "%s : %d - %d\n", peer_ip, c_info_used_in_thread->port_received, c_info_used_in_thread->chunk_id_associated);
 
-                write_file << line_to_write;
+            write_file << line_to_write;
         }
     }
 

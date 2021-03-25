@@ -15,7 +15,7 @@
 
 #include "util.h"
 
-#define MAX_BUFFER_SIZE 64
+#define MAX_BUFFER_SIZE 32
 
 
 void usage(int argc, char **argv) {
@@ -99,21 +99,14 @@ int main(int argc, char* argv[]) {
 
     while(1) {
         // declarar um buffer vetor de char com um tamanho maior que suficiente para o recebimento
-        char buffer_received[MAX_BUFFER_SIZE];
+        int16_t buffer_received[MAX_BUFFER_SIZE];
         
         // esperar a chegada de uma mensagem (recvfrom)
-        int bytes_received = recvfrom(peer_sock, buffer_received, MAX_BUFFER_SIZE-1, 0, (struct sockaddr*)&communicator_info, &communicator_addr_len);
+        int bytes_received = recvfrom(peer_sock, (void*)buffer_received, MAX_BUFFER_SIZE-1, 0, (struct sockaddr*)&communicator_info, &communicator_addr_len);
 
         if (bytes_received < 0) {
             logexit("recvfrom() error\n");
         }
-
-        char msg_type_received[2];
-        msg_type_received[0] = buffer_received[0];
-        msg_type_received[1] = buffer_received[1];
-
-        // identificar o tipo de mensagem (primeiros 2 bytes)
-        uint16_t message_type_received = parse_uint16(msg_type_received);
 
         HELLO_MESSAGE hello_msg_received;
         GET_MESSAGE get_msg_received;
@@ -123,53 +116,28 @@ int main(int argc, char* argv[]) {
 
         std::vector<uint16_t> client_chunks_id;
 
-        char chunks_amount[2];
-
-        switch (message_type_received) {
-            // caso seja QUERY:
-            // Realizar um Type cast com o IP e Porto pra um uint e ushort
-            // Type cast para ushort para a qtd de chunks
-            // Alocar uma lista/vetor de ushort com o tamanho da quantidade
-            case MESSAGE_TYPE::QUERY: 
-                char client_ip_received[4];
-                client_ip_received[0] = buffer_received[2];
-                client_ip_received[1] = buffer_received[3];
-                client_ip_received[2] = buffer_received[4];
-                client_ip_received[3] = buffer_received[5];
-
-                // char* client_ip_parsed = parse_ip_recv(client_ip_received);
-
-                char client_port_received[2];
-                client_port_received[0] = buffer_received[6];
-                client_port_received[1] = buffer_received[7];
-                
-                // uint16_t port = parse_port_recv(client_port_received);
-
-                char peer_ttl[2];
-                peer_ttl[0] = buffer_received[8];
-                peer_ttl[1] = buffer_received[9];
-
-                chunks_amount[0] = buffer_received[10];
-                chunks_amount[1] = buffer_received[11];
-
-                // iterar sobre o buffer received para salvar a lista de chunks id
-
+        // Montagem da mensagem recebida
+        switch(ntohs(buffer_received[0])) {
+            case (uint16_t)HELLO:
+                hello_msg_received.chunks_amount = ntohs(buffer_received[1]);
+                for(int16_t i = 0; i < hello_msg_received.chunks_amount; i++)
+                    hello_msg_received.chunks_id[i] = ntohs(buffer_received[2+i]);
                 break;
-            
-            case MESSAGE_TYPE::HELLO:
-            case MESSAGE_TYPE::GET:
-                // caso seja HELLO/GET:
-                // Realizar um type cast pra ushort para a qtd de chunks
-                // Alocar uma lista/vetor de ushort com o tamanho da quantidade
-
-                chunks_amount[0] = buffer_received[10];
-                chunks_amount[1] = buffer_received[11];
-
-                // iterar sobre o buffer received para salvar a lista de chunks id
-
+            case (uint16_t)GET:
+                get_msg_received.chunks_amount = ntohs(buffer_received[1]);
+                for(int16_t i = 0; i < get_msg_received.chunks_amount; i++)
+                    get_msg_received.chunks_id[i] = ntohs(buffer_received[2+i]);
+                break;
+            case (uint16_t)QUERY:
+                uint32_t *client_ip_received = (uint32_t*)&buffer_received[1];
+                query_message_received.client_ip = ntohl(*client_ip_received);
+                query_message_received.client_port = ntohs(buffer_received[3]);
+                query_message_received.peer_ttl = ntohs(buffer_received[4]);
+                query_message_received.chunks_amount = ntohs(buffer_received[5]);
+                for(int16_t i = 0; i < query_message_received.chunks_amount; i++)
+                    query_message_received.chunks_id[i] = ntohs(buffer_received[6+i]);
                 break;
         }
-
         
         // Apos a inicialização das structs das mensagens
         
@@ -186,45 +154,6 @@ int main(int argc, char* argv[]) {
         // Quantidade de chunks: Todos recebidos - Contido pelo peer atual
         // Enviar mensagem QUERY para todos os peers vizinhos
 
-        if (message_type_received == MESSAGE_TYPE::HELLO) {
-            query_msg_to_send.client_ip = (int)communicator_info.sin_addr.s_addr;
-            query_msg_to_send.client_port = (uint16_t)communicator_info.sin_port;
-            query_msg_to_send.peer_ttl = 3;
-
-            CHUNKS_INFO_MESSAGE chunks_info_msg_to_send;
-
-            int counter = 0;
-            for (uint16_t &c_chunk_id : hello_msg_received.chunks_id) {
-                if(key_values_file_map.count(c_chunk_id) == 1) {
-                    chunks_info_msg_to_send.chunks_amount++;
-                    chunks_info_msg_to_send.chunks_id[counter] = c_chunk_id;
-                } else {
-                    query_msg_to_send.chunks_amount++;
-                    query_msg_to_send.chunks_id[counter] = c_chunk_id;
-                }
-                counter++;
-            }
-
-            if (chunks_info_msg_to_send.chunks_amount > 0) {
-                int num_bytes_sent = sendto(peer_sock, &chunks_info_msg_to_send, sizeof(CHUNKS_INFO_MESSAGE), 0, (sockaddr*)&communicator_info, communicator_addr_len);
-
-                if (num_bytes_sent < 0) {
-                    logexit("chunks_info sendto() error\n");
-                }
-            }
-
-            if (query_msg_to_send.chunks_amount > 0) {
-                socklen_t neigh_peer_addr_len = (socklen_t)sizeof(sockaddr);
-                for (sockaddr_in &neigh_peer : peer_neighboorhood) {
-                    int num_bytes_sent = sendto(peer_sock, &query_msg_to_send, sizeof(QUERY_MESSAGE), 0, (sockaddr*)&neigh_peer, neigh_peer_addr_len);
-
-                    if (num_bytes_sent < 0) {
-                        logexit("query sendto() error\n");
-                    }
-                }
-            }
-        }
-
         // Caso seja msg QUERY:
         // Verificar lista de chunks recebida e se há um ou mais chunks contidos
         // Caso sim Montar a mensagem CHUNKS_INFO
@@ -237,56 +166,6 @@ int main(int argc, char* argv[]) {
         // Quantidade de chunks: Todos recebidos menos os contidos pelo peer atual
         // Enviar mensagem QUERY para todos os peers vizinhos
 
-        if (message_type_received == MESSAGE_TYPE::QUERY) {
-            query_msg_to_send.client_ip = query_message_received.client_ip;
-            query_msg_to_send.client_port = query_message_received.client_port;
-            query_msg_to_send.peer_ttl = query_message_received.peer_ttl - 1;
-
-            bool query_already_received = last_query_message_received.client_ip == query_message_received.client_ip && last_query_message_received.client_port == query_message_received.client_port;
-
-            if (query_already_received) {
-                continue;
-            }
-
-            struct sockaddr_in client_addr;
-            socklen_t client_addr_len = (socklen_t)sizeof(sockaddr);
-            client_addr.sin_addr.s_addr = query_message_received.client_ip;
-            client_addr.sin_port = query_message_received.client_port;
-
-            CHUNKS_INFO_MESSAGE chunks_info_msg_to_send;
-
-            int counter = 0;
-            for (uint16_t &c_chunk_id : query_message_received.chunks_id) {
-                if(key_values_file_map.count(c_chunk_id) == 1) {
-                    chunks_info_msg_to_send.chunks_amount++;
-                    chunks_info_msg_to_send.chunks_id[counter] = c_chunk_id;
-                } else {
-                    query_msg_to_send.chunks_amount++;
-                    query_msg_to_send.chunks_id[counter] = c_chunk_id;
-                }
-                counter++;
-            }
-
-            if (chunks_info_msg_to_send.chunks_amount > 0) {
-                int num_bytes_sent = sendto(peer_sock, &chunks_info_msg_to_send, sizeof(CHUNKS_INFO_MESSAGE), 0, (sockaddr*)&client_addr, client_addr_len);
-
-                if (num_bytes_sent < 0) {
-                    logexit("chunks_info sendto() error\n");
-                }
-            }
-
-            if (query_msg_to_send.chunks_amount > 0 && query_msg_to_send.peer_ttl > 0) {
-                socklen_t neigh_peer_addr_len = (socklen_t)sizeof(sockaddr);
-                for (sockaddr_in &neigh_peer : peer_neighboorhood) {
-                    int num_bytes_sent = sendto(peer_sock, &query_msg_to_send, sizeof(QUERY_MESSAGE), 0, (sockaddr*)&neigh_peer, neigh_peer_addr_len);
-
-                    if (num_bytes_sent < 0) {
-                        logexit("query sendto() error\n");
-                    }
-                }
-            }
-        }
-
         // Caso seja msg GET:
         // 
         // Verificar a lista de chunks solicitados
@@ -297,38 +176,136 @@ int main(int argc, char* argv[]) {
         // chunk size
         // chunk lido
 
-        if (message_type_received == MESSAGE_TYPE::GET) {
-            for (int16_t chunk_id : get_msg_received.chunks_id) {
-                char* chunk_file_name;
-                sprintf(chunk_file_name, "./Chunks/BigBuckBunny_%d.m4s", chunk_id);
-                char* chunk_file_content = (char*)calloc(1024, sizeof(char));
-                std::ifstream chunk_file(chunk_file_name);
-                
-                if(!chunk_file.is_open()) {
-                    logexit("chunk file open() error\n");
+        switch(ntohs(buffer_received[0])) {
+            case (uint16_t)HELLO:
+                CHUNKS_INFO_MESSAGE chunks_info_msg_to_send;
+
+                int counter = 0;
+                for (uint16_t &c_chunk_id : hello_msg_received.chunks_id) {
+                    if(key_values_file_map.count(c_chunk_id) == 1) {
+                        chunks_info_msg_to_send.chunks_amount++;
+                        chunks_info_msg_to_send.chunks_id[counter] = htons(c_chunk_id);
+                    } else {
+                        query_msg_to_send.chunks_amount++;
+                        query_msg_to_send.chunks_id[counter] = htons(c_chunk_id);
+                    }
+                    counter++;
                 }
 
-                std::stringstream buffer;
-                buffer << chunk_file.rdbuf();
-                
-                chunk_file_content = strdup(buffer.str().c_str());
+                if (chunks_info_msg_to_send.chunks_amount > 0) {
+                    chunks_info_msg_to_send.msg_type = htons(chunks_info_msg_to_send.msg_type);
+                    chunks_info_msg_to_send.chunks_amount = htons(chunks_info_msg_to_send.chunks_amount);
 
-                RESPONSE_MESSAGE response_message_to_send;
-                response_message_to_send.chunk_id = chunk_id;
-                response_message_to_send.chunk_size = 1024;
-                strncpy(response_message_to_send.chunk, chunk_file_content, 1024);
+                    int num_bytes_sent = sendto(peer_sock, (void*)&chunks_info_msg_to_send, sizeof(CHUNKS_INFO_MESSAGE), 0, (sockaddr*)&communicator_info, communicator_addr_len);
+
+                    if (num_bytes_sent < 0) {
+                        logexit("chunks_info sendto() error\n");
+                    }
+                }
+
+                if (query_msg_to_send.chunks_amount > 0) {
+                    query_msg_to_send.msg_type = htons(query_msg_to_send.msg_type);
+                    query_msg_to_send.client_ip = htonl((uint32_t)communicator_info.sin_addr.s_addr);
+                    query_msg_to_send.client_port = htons((uint16_t)communicator_info.sin_port);
+                    query_msg_to_send.peer_ttl = htons((uint16_t)3);
+                    socklen_t neigh_peer_addr_len = (socklen_t)sizeof(sockaddr);
+                    for (sockaddr_in &neigh_peer : peer_neighboorhood) {
+                        int num_bytes_sent = sendto(peer_sock, (void*)&query_msg_to_send, sizeof(QUERY_MESSAGE), 0, (sockaddr*)&neigh_peer, neigh_peer_addr_len);
+
+                        if (num_bytes_sent < 0) {
+                            logexit("query sendto() error\n");
+                        }
+                    }
+                }
+                break;
+            case (uint16_t)QUERY:
+                bool query_already_received = last_query_message_received.client_ip == query_message_received.client_ip && last_query_message_received.client_port == query_message_received.client_port;
+
+                if (query_already_received) {
+                    continue;
+                }
 
                 struct sockaddr_in client_addr;
                 socklen_t client_addr_len = (socklen_t)sizeof(sockaddr);
                 client_addr.sin_addr.s_addr = query_message_received.client_ip;
                 client_addr.sin_port = query_message_received.client_port;
 
-                int num_bytes_sent = sendto(peer_sock, &response_message_to_send, sizeof(RESPONSE_MESSAGE), 0, (sockaddr*)&client_addr, client_addr_len);
+                CHUNKS_INFO_MESSAGE chunks_info_msg_to_send;
 
-                if (num_bytes_sent < 0) {
-                    logexit("Response sendto() error\n");
+                int counter = 0;
+                for (uint16_t &c_chunk_id : query_message_received.chunks_id) {
+                    if(key_values_file_map.count(c_chunk_id) == 1) {
+                        chunks_info_msg_to_send.chunks_amount++;
+                        chunks_info_msg_to_send.chunks_id[counter] = htons(c_chunk_id);
+                    } else {
+                        query_msg_to_send.chunks_amount++;
+                        query_msg_to_send.chunks_id[counter] = htons(c_chunk_id);
+                    }
+                    counter++;
                 }
-            }
+
+                if (chunks_info_msg_to_send.chunks_amount > 0) {
+                    chunks_info_msg_to_send.msg_type = htons(chunks_info_msg_to_send.msg_type);
+                    chunks_info_msg_to_send.chunks_amount = htons(chunks_info_msg_to_send.chunks_amount);
+
+                    int num_bytes_sent = sendto(peer_sock, (void*)&chunks_info_msg_to_send, sizeof(CHUNKS_INFO_MESSAGE), 0, (sockaddr*)&client_addr, client_addr_len);
+
+                    if (num_bytes_sent < 0) {
+                        logexit("chunks_info sendto() error\n");
+                    }
+                }
+
+                if (query_msg_to_send.chunks_amount > 0 && query_msg_to_send.peer_ttl > 0) {
+                    query_msg_to_send.msg_type = htons(query_msg_to_send.msg_type);
+                    query_msg_to_send.client_ip = htonl(query_message_received.client_ip);
+                    query_msg_to_send.client_port = htons(query_message_received.client_port);
+                    query_msg_to_send.peer_ttl = htons(query_message_received.peer_ttl - 1);
+                    query_msg_to_send.chunks_amount = htons(query_msg_to_send.chunks_amount);
+
+                    socklen_t neigh_peer_addr_len = (socklen_t)sizeof(sockaddr);
+                    for (sockaddr_in &neigh_peer : peer_neighboorhood) {
+                        int num_bytes_sent = sendto(peer_sock, (void*)&query_msg_to_send, sizeof(QUERY_MESSAGE), 0, (sockaddr*)&neigh_peer, neigh_peer_addr_len);
+
+                        if (num_bytes_sent < 0) {
+                            logexit("query sendto() error\n");
+                        }
+                    }
+                }
+                break;
+            case (uint16_t)GET:
+                for (int16_t chunk_id : get_msg_received.chunks_id) {
+                    char* chunk_file_name;
+                    sprintf(chunk_file_name, "./Chunks/BigBuckBunny_%d.m4s", chunk_id);
+                    char* chunk_file_content = (char*)calloc(1024, sizeof(char));
+                    std::ifstream chunk_file(chunk_file_name);
+                    
+                    if(!chunk_file.is_open()) {
+                        logexit("chunk file open() error\n");
+                    }
+
+                    std::stringstream buffer;
+                    buffer << chunk_file.rdbuf();
+                    
+                    chunk_file_content = strdup(buffer.str().c_str());
+
+                    RESPONSE_MESSAGE response_message_to_send;
+                    response_message_to_send.msg_type = htons(response_message_to_send.msg_type);
+                    response_message_to_send.chunk_id = htons(chunk_id);
+                    response_message_to_send.chunk_size = htons((uint16_t)1024);
+                    strncpy(response_message_to_send.chunk, chunk_file_content, 1024);
+
+                    struct sockaddr_in client_addr;
+                    socklen_t client_addr_len = (socklen_t)sizeof(sockaddr);
+                    client_addr.sin_addr.s_addr = query_message_received.client_ip;
+                    client_addr.sin_port = query_message_received.client_port;
+
+                    int num_bytes_sent = sendto(peer_sock, (void*)&response_message_to_send, sizeof(RESPONSE_MESSAGE), 0, (sockaddr*)&client_addr, client_addr_len);
+
+                    if (num_bytes_sent < 0) {
+                        logexit("Response sendto() error\n");
+                    }
+                }
+                break;
         }
     }
 
