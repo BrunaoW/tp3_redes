@@ -39,6 +39,26 @@ std::string trim(std::string& str) {
     return str;
 }
 
+char *trimwhitespace(char *str)
+{
+  char *end;
+
+  // Trim leading space
+  while(isspace((unsigned char)*str)) str++;
+
+  if(*str == 0)  // All spaces?
+    return str;
+
+  // Trim trailing space
+  end = str + strlen(str) - 1;
+  while(end > str && isspace((unsigned char)*end)) end--;
+
+  // Write new null terminator character
+  end[1] = '\0';
+
+  return str;
+}
+
 int powInt(int x, int y)
 {
     for (int i = 0; i < y; i++)
@@ -87,3 +107,14 @@ uint16_t parse_port_recv(char* portstr) {
     port = ntohs(port);
     return(port);
 }
+
+uint32_t parse_query_msg_ip_to_uint32(uint16_t* ip) {
+    uint32_t parsed_ip = ((uint32_t) ip[0] << 16) + ip[1];
+    return parsed_ip;
+}
+
+void parse_uint32_to_query_msg_ip(uint32_t ip_long, uint16_t* query_msg_ip) {
+    query_msg_ip[0] = (uint16_t) (ip_long >> 16);
+    query_msg_ip[1] = (uint16_t) (ip_long & 0x0000FFFFuL);
+}
+
