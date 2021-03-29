@@ -66,6 +66,7 @@ void* receive_chunk_info_thread(void* client_info) {
             c_info_for_thread.ip_received = peer_connecting_info.sin_addr;
             c_info_for_thread.port_received = peer_connecting_info.sin_port;
 
+            // preenche os campos da mensagem CHUNKS_INFO recebida
             chunks_info_received.chunks_amount = ntohs(buffer_received[1]);
             for (uint16_t i = 0; i < chunks_info_received.chunks_amount; i++)
                 chunks_info_received.chunks_id[i] = ntohs(buffer_received[i + 2]);
@@ -138,12 +139,14 @@ int main(int argc, char* argv[]) {
         usage(argc, argv);
     }
 
+    // Separa o IP e o porto recebido pela linha de comando
     char* ip_and_port = argv[1];
     char* peer_ip = strtok(ip_and_port, ":");
     char* peer_port = strtok(NULL, ":");
 
     struct addrinfo contact_peer_info;
 
+    // Inicializa as informações do peer de contato
     memset(&contact_peer_info, 0, sizeof(struct addrinfo));
     contact_peer_info.ai_family = AF_INET;
     contact_peer_info.ai_socktype = SOCK_DGRAM;
@@ -156,7 +159,7 @@ int main(int argc, char* argv[]) {
         logexit("getaddrinfo() error\n");
     }
 
-    // Criar lista de chunks requisitados
+    // Cria lista dos chunks requisitados pela linha de comando
     char* chunks_id = argv[2];
     char* chunk_id_str;
     std::vector<uint16_t> chunks_id_read;
@@ -186,7 +189,7 @@ int main(int argc, char* argv[]) {
         perror("Error creating timeout");
     }
 
-    // Criar N threads, de acordo com a quantidade de chunks requisitados
+    // Criar 2*N threads, sendo N a quantidade de chunks requisitados
     struct sockaddr_in local;
     local.sin_family = AF_INET;
     local.sin_addr.s_addr = INADDR_ANY;
@@ -221,9 +224,9 @@ int main(int argc, char* argv[]) {
     }
 
     // Essas threads irão esperar, por um tempo determinado, um recvfrom dos peers que contém os chunks
-    // caso ultrapasse esse tempo de espera, será dado um timeout
+    // caso ultrapasse esse tempo de espera, a thread é fechada
 
-    // Montar uma HELLO_MESSAGE
+    // Monta uma HELLO_MESSAGE
     printf("Creating HELLO message\n");
 
     HELLO_MESSAGE hello_message_to_send;
@@ -232,7 +235,7 @@ int main(int argc, char* argv[]) {
     for(uint16_t i = 0; i < chunks_id_read.size(); i++)
         hello_message_to_send.chunks_id[i] = htons(chunks_id_read[i]);
 
-    // Enviar ao peer de contato
+    // Envia HELLO message ao peer de contato
     int bytes_sent = sendto(client_sock, (void*)&hello_message_to_send, sizeof(HELLO_MESSAGE), 0, peer_addr->ai_addr, peer_addr->ai_addrlen);
     if (bytes_sent < 0) {
         logexit("sendto() error\n");
@@ -240,8 +243,7 @@ int main(int argc, char* argv[]) {
 
     printf("HELLO message sent\n");
 
-    // Aguardar a finalização de todas as threads
-
+    // Aguarda a finalização de todas as threads
     for (pthread_t &thread_id : chunk_search_threads) {
         pthread_join(thread_id, NULL);
     }

@@ -31,6 +31,7 @@ int main(int argc, char* argv[]) {
         usage(argc, argv);
     }
     
+    // Separa o IP e o porto recebido pela linha de comando
     char* ip_and_port = argv[1];
     char* peer_ip = strtok(ip_and_port, ":");
     char* peer_port = strtok(NULL, ":");
@@ -59,6 +60,7 @@ int main(int argc, char* argv[]) {
 
     freeaddrinfo(res);
 
+    // inicializa vizinhaça de peers a partir do que foi passado na linha de comando
     std::vector<sockaddr_in> peer_neighboorhood;
 
     for(int i = 3; i < argc; i++ ) {
@@ -73,7 +75,6 @@ int main(int argc, char* argv[]) {
 
     // Ler arquivo key-value
     // Criar a lista que associa ID com string com nome dos chunks
-
     std::string actual_key_values_file_line;
     char key_values_file_name[64];
     sprintf(key_values_file_name, "./Key-values-files/%s", argv[2]);
@@ -187,6 +188,7 @@ int main(int argc, char* argv[]) {
                 printf("Reading HELLO message\n");
                 CHUNKS_INFO_MESSAGE chunks_info_msg_to_send;
 
+                // A partir da hello msg, preenche informações do chunks_info e query a enviar
                 for (uint16_t c_chunk_id = 0; c_chunk_id < hello_msg_received.chunks_amount; c_chunk_id++) {
                     if(key_values_file_map.find(hello_msg_received.chunks_id[c_chunk_id]) != key_values_file_map.end()) {
                         chunks_info_msg_to_send.chunks_id[chunks_info_msg_to_send.chunks_amount] = htons(hello_msg_received.chunks_id[c_chunk_id]);
@@ -197,6 +199,7 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
+                // caso o peer possua chunks requisitados pelo cliente
                 if (chunks_info_msg_to_send.chunks_amount > 0) {
                     printf("Creating CHUNKS_INFO message to send\n");
                     chunks_info_msg_to_send.msg_type = htons(chunks_info_msg_to_send.msg_type);
@@ -213,6 +216,7 @@ int main(int argc, char* argv[]) {
                     printf("CHUNKS_INFO message sent - %s : %d\n", inet_ntoa(communicator_info.sin_addr), ntohs(communicator_info.sin_port));
                 }
 
+                // caso ainda existam chunks requisitados pelo cliente que o peer nao possui
                 if (query_msg_to_send.chunks_amount > 0) {
                     printf("Creating QUERY message to send\n");
 
@@ -241,7 +245,7 @@ int main(int argc, char* argv[]) {
             case QUERY:
             {
                 printf("Reading QUERY message\n");
-
+                // preenche informações do cliente a partir da query message recebida
                 struct sockaddr_in client_addr;
                 client_addr.sin_addr.s_addr = (uint32_t)(parse_query_msg_ip_to_uint32(&query_message_received.client_ip[0]));
                 client_addr.sin_port = (query_message_received.client_port);
@@ -250,6 +254,7 @@ int main(int argc, char* argv[]) {
 
                 CHUNKS_INFO_MESSAGE chunks_info_msg_to_send;
 
+                // A partir da query msg, preenche informações do chunks_info e query a enviar
                 for (uint16_t c_chunk_id = 0; c_chunk_id < query_message_received.chunks_amount; c_chunk_id++) {
                     if(key_values_file_map.find(query_message_received.chunks_id[c_chunk_id]) != key_values_file_map.end()) {
                         chunks_info_msg_to_send.chunks_id[chunks_info_msg_to_send.chunks_amount] = htons(query_message_received.chunks_id[c_chunk_id]);
@@ -260,6 +265,7 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
+                // caso o peer possua um ou mais chunks requisitados pelo cliente
                 if (chunks_info_msg_to_send.chunks_amount > 0) {
                     printf("Creating CHUNKS_INFO message to send\n");
 
@@ -277,6 +283,7 @@ int main(int argc, char* argv[]) {
                     printf("CHUNKS_INFO message sent - %s : %d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
                 }
 
+                // caso ainda existam chunks requisitados pelo cliente que o peer nao possui e que o final da rede ainda não foi alcançado
                 if (query_msg_to_send.chunks_amount > 0 && query_msg_to_send.peer_ttl > 0) {
                     printf("Creating QUERY message to send\n");
 
@@ -306,7 +313,8 @@ int main(int argc, char* argv[]) {
             case GET:
             {
                 printf("Reading GET message\n");
-
+                
+                // Pra cada chunk_id recebido no GET, ler o repectivo arquivo chunk, montar a msg Response e enviar 
                 for (int16_t i = 0; i < get_msg_received.chunks_amount; i++) {
                     char chunk_file_name[64];
                     sprintf(chunk_file_name, "./Chunks/BigBuckBunny_%d.m4s", get_msg_received.chunks_id[i]);
